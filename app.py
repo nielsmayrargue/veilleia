@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.formatters import TextFormatter
+from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled, VideoUnavailable
 import os
 
 app = Flask(__name__)
@@ -10,17 +9,16 @@ def get_transcript():
     data = request.json
     
     if not data or 'videoId' not in data:
-        return jsonify({'error': 'videoId requis'}), 400
+        return jsonify({'success': False, 'error': 'videoId requis'}), 400
     
     video_id = data['videoId']
     
     try:
-        # Tenter de récupérer la transcription
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['fr', 'en'])
+        # Tenter de récupérer la transcription avec plusieurs langues possibles
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['fr', 'en', 'es', 'de', 'auto'])
         
-        # Formatter la transcription en texte simple
-        formatter = TextFormatter()
-        transcript_text = formatter.format_transcript(transcript_list)
+        # Convertir la liste de segments en texte continu
+        transcript_text = ' '.join([segment['text'] for segment in transcript_list])
         
         return jsonify({
             'success': True,
@@ -28,20 +26,40 @@ def get_transcript():
             'transcript': transcript_text
         })
     
-    except Exception as e:
-        # Gérer les erreurs (transcription non disponible, etc.)
+    except NoTranscriptFound:
         return jsonify({
             'success': False,
             'videoId': video_id,
-            'error': str(e)
+            'error': "Aucune transcription trouvée pour les langues demandées."
         }), 404
+    
+    except TranscriptsDisabled:
+        return jsonify({
+            'success': False,
+            'videoId': video_id,
+            'error': "Les transcriptions sont désactivées pour cette vidéo."
+        }), 404
+    
+    except VideoUnavailable:
+        return jsonify({
+            'success': False,
+            'videoId': video_id,
+            'error': "La vidéo n'est pas disponible ou n'existe pas."
+        }), 404
+    
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'videoId': video_id,
+            'error': f"Erreur lors de la récupération de la transcription: {str(e)}"
+        }), 500
 
-# Ajouter un endpoint de santé pour vérifier que le service fonctionne
+# Ajouter un endpoint de santé
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'ok'}), 200
 
-# Ajouter CORS headers pour éviter les problèmes avec n8n
+# Ajouter CORS headers
 @app.after_request
 def add_cors_headers(response):
     response.headers.add('Access-Control-Allow-Origin', '*')
